@@ -33,16 +33,10 @@ def get_roblox_games():
             
             if current_players >= CCU_THRESHOLD:
                 last_players = history.get(place_id)
-                # Check if this game is brand new to the 10k club
                 is_brand_new = last_players is None
                 
-                if is_brand_new:
-                    change_text = "⭐ NEW!"
-                    growth = 0
-                else:
-                    diff = current_players - last_players
-                    change_text = f"{diff:+,}"
-                    growth = diff
+                growth = 0 if is_brand_new else current_players - last_players
+                change_text = "⭐ NEW!" if is_brand_new else f"{growth:+,}"
 
                 all_games.append({
                     "name": name,
@@ -56,6 +50,7 @@ def get_roblox_games():
         with open(HISTORY_FILE, "w") as f:
             json.dump(new_history, f)
 
+        # Sort by player count
         all_games.sort(key=lambda x: x['players'], reverse=True)
         return all_games
 
@@ -63,40 +58,45 @@ def get_roblox_games():
         print(f"Error: {e}")
         sys.exit(1)
 
+def create_embed(title, games_slice, start_rank):
+    embed = {
+        "title": title,
+        "color": 3447003, # Elegant Blue
+        "fields": []
+    }
+    
+    for i, g in enumerate(games_slice, start=start_rank):
+        # Add special emojis for top 3
+        rank_emoji = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"**#{i}**")
+        
+        new_tag = " 🆕" if g['is_brand_new'] else ""
+        
+        embed["fields"].append({
+            "name": f"{rank_emoji} {g['name']}{new_tag}",
+            "value": f"👤 `{g['players']:,}` | 📈 `{g['change']}` | [Play]({g['url']})",
+            "inline": True # This makes it look like a grid/table
+        })
+    return embed
+
 def send_to_discord(games):
     if not games:
         return
 
-    # 1. Identify new games for the ping
-    new_game_names = [g['name'] for g in games if g['is_brand_new']]
+    # 1. Pings and Summary
+    new_count = sum(1 for g in games if g['is_brand_new'])
+    ping_text = f"🔔 <@{USER_ID}>" if USER_ID and new_count > 0 else "📊 **Daily Update**"
     
-    content = "📅 **Daily Roblox CCU Report is here!**"
-    if new_game_names and USER_ID:
-        # This creates the actual ping notification
-        content = f"🔔 <@{USER_ID}> **New Games Hit 10k CCU:** {', '.join(new_game_names)}!"
-
-    # 2. Create the visual report
-    embed = {
-        "title": "Roblox Market Trends",
-        "description": "Top games currently over 10,000 players.",
-        "color": 16738560, # Orange/Flame color
-        "fields": []
-    }
-
-    for g in games[:10]:
-        embed["fields"].append({
-            "name": f"{'⭐ ' if g['is_brand_new'] else ''}{g['name']}",
-            "value": f"👥 **{g['players']:,}** ({g['change']})\n🔗 [Play Game]({g['url']})",
-            "inline": False
-        })
+    # 2. Split 30 games into two embeds (15 each) for a "prettier" grid layout
+    embed1 = create_embed("🏆 Top Roblox Games (1-15)", games[:15], 1)
+    embed2 = create_embed("📈 Top Roblox Games (16-30)", games[15:30], 16)
 
     payload = {
-        "content": content,
-        "embeds": [embed]
+        "content": f"{ping_text}\nFound **{len(games)}** games over 10k CCU today!",
+        "embeds": [embed1, embed2]
     }
     
     requests.post(WEBHOOK_URL, json=payload)
-    print("✅ Discord alert sent!")
+    print("✅ Prettier report sent!")
 
 if __name__ == "__main__":
     game_data = get_roblox_games()
