@@ -26,7 +26,7 @@ jobs:
           BREVO_KEY: ${{ secrets.BREVO_KEY }}
           TARGET_EMAIL: ${{ secrets.TARGET_EMAIL }}
         run: python tracker.py
-
+        
 - name: Save History for Tomorrow
         run: |
           git config --global user.name "github-actions[bot]"
