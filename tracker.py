@@ -9,77 +9,74 @@ SMTP_USER = os.getenv("BREVO_USER")
 SMTP_KEY = os.getenv("BREVO_KEY")
 TARGET_EMAIL = os.getenv("TARGET_EMAIL")
 CCU_THRESHOLD = 10000
+HISTORY_FILE = "history.txt"
 
 def get_roblox_games():
     url = "https://api.rolimons.com/games/v1/gamelist"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
-        print("Fetching data from Rolimon's API...")
+        # 1. Load history of IDs from previous run
+        history = set()
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, "r") as f:
+                history = set(line.strip() for line in f)
+
+        print("Fetching data from Rolimon's...")
         response = requests.get(url, headers=headers)
         response.raise_for_status()
-        
         data = response.json()
-        if not data.get('success'):
-            print("API error: Success was False")
-            return []
-
-        games_dict = data.get('games', {})
-        print(f"Scanning {len(games_dict)} games...")
         
-        # 1. Collect structured data first
+        games_dict = data.get('games', {})
         filtered_games = []
+        current_ids = []
+
         for place_id, info in games_dict.items():
-            name = info[0]
-            players = info[1]
-            
+            name, players = info[0], info[1]
             if players >= CCU_THRESHOLD:
+                is_new = place_id not in history
                 filtered_games.append({
                     "name": name,
                     "players": players,
-                    "url": f"https://www.roblox.com/games/{place_id}"
+                    "url": f"https://www.roblox.com/games/{place_id}",
+                    "is_new": is_new
                 })
-        
-        # 2. Sort numerically by player count (Highest first)
+                current_ids.append(place_id)
+
+        # 2. Save current IDs for tomorrow
+        with open(HISTORY_FILE, "w") as f:
+            for pid in current_ids:
+                f.write(f"{pid}\n")
+
+        # 3. Sort and Format
         filtered_games.sort(key=lambda x: x['players'], reverse=True)
         
-        # 3. Format into strings for the email
-        trending_strings = []
+        email_lines = []
         for g in filtered_games:
-            trending_strings.append(f"🔥 {g['name']}: {g['players']:,} players\n🔗 {g['url']}\n")
+            tag = "⭐ NEW!" if g['is_new'] else "🔥"
+            email_lines.append(f"{tag} {g['name']}: {g['players']:,} players\n🔗 {g['url']}\n")
             
-        return trending_strings
+        return email_lines
 
     except Exception as e:
-        print(f"ERROR: Could not process data: {e}")
+        print(f"ERROR: {e}")
         sys.exit(1)
 
 def send_email(game_list):
-    if not SMTP_USER or not SMTP_KEY:
-        print("ERROR: Secrets are missing!")
-        sys.exit(1)
+    msg = EmailMessage()
+    msg['Subject'] = f"🚀 Roblox Tracker: {len(game_list)} Games @ 10k+ CCU"
+    msg['From'] = SMTP_USER
+    msg['To'] = TARGET_EMAIL
+    
+    body = "Games currently over the 10,000 player threshold:\n\n"
+    body += "\n".join(game_list) if game_list else "No games meet the threshold."
+    msg.set_content(body)
 
-    try:
-        msg = EmailMessage()
-        msg['Subject'] = f"🚀 Roblox Tracker: {len(game_list)} Games over 10k CCU"
-        msg['From'] = SMTP_USER
-        msg['To'] = TARGET_EMAIL
-        
-        body = "Top Roblox games currently over the 10,000 player threshold:\n\n"
-        body += "\n".join(game_list) if game_list else "No games meet the threshold today."
-        msg.set_content(body)
-
-        print(f"Sending email via Brevo to {TARGET_EMAIL}...")
-        with smtplib.SMTP('smtp-relay.brevo.com', 587) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_KEY)
-            server.send_message(msg)
-        print("✅ Success! Check your inbox.")
-    except Exception as e:
-        print(f"ERROR sending email: {e}")
-        sys.exit(1)
+    with smtplib.SMTP('smtp-relay.brevo.com', 587) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_KEY)
+        server.send_message(msg)
+    print("✅ Email sent!")
 
 if __name__ == "__main__":
     games = get_roblox_games()
