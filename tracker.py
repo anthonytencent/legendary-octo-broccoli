@@ -11,7 +11,6 @@ TARGET_EMAIL = os.getenv("TARGET_EMAIL")
 CCU_THRESHOLD = 10000
 
 def get_roblox_games():
-    # Using Rolimon's API because the official Roblox 'list' API was deleted.
     url = "https://api.rolimons.com/games/v1/gamelist"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
@@ -24,33 +23,42 @@ def get_roblox_games():
         
         data = response.json()
         if not data.get('success'):
-            print("API responded but success was False.")
+            print("API error: Success was False")
             return []
 
         games_dict = data.get('games', {})
-        print(f"Scanning {len(games_dict)} games for {CCU_THRESHOLD}+ players...")
+        print(f"Scanning {len(games_dict)} games...")
         
-        trending = []
-        # Rolimon's format: "PlaceID": ["Name", PlayerCount, "IconURL"]
+        # 1. Collect structured data first
+        filtered_games = []
         for place_id, info in games_dict.items():
             name = info[0]
             players = info[1]
             
             if players >= CCU_THRESHOLD:
-                game_url = f"https://www.roblox.com/games/{place_id}"
-                trending.append(f"🔥 {name}: {players:,} players\n🔗 {game_url}\n")
+                filtered_games.append({
+                    "name": name,
+                    "players": players,
+                    "url": f"https://www.roblox.com/games/{place_id}"
+                })
         
-        # Sort by player count (highest first)
-        trending.sort(key=lambda x: int(x.split(': ')[1].split(' ')[0].replace(',', '')), reverse=True)
-        return trending
+        # 2. Sort numerically by player count (Highest first)
+        filtered_games.sort(key=lambda x: x['players'], reverse=True)
+        
+        # 3. Format into strings for the email
+        trending_strings = []
+        for g in filtered_games:
+            trending_strings.append(f"🔥 {g['name']}: {g['players']:,} players\n🔗 {g['url']}\n")
+            
+        return trending_strings
 
     except Exception as e:
-        print(f"ERROR: Could not get game data: {e}")
+        print(f"ERROR: Could not process data: {e}")
         sys.exit(1)
 
 def send_email(game_list):
     if not SMTP_USER or not SMTP_KEY:
-        print("ERROR: Brevo credentials missing!")
+        print("ERROR: Secrets are missing!")
         sys.exit(1)
 
     try:
@@ -59,20 +67,16 @@ def send_email(game_list):
         msg['From'] = SMTP_USER
         msg['To'] = TARGET_EMAIL
         
-        body = "Here are the top Roblox games currently over the 10,000 player threshold:\n\n"
-        if game_list:
-            body += "\n".join(game_list)
-        else:
-            body += "No games currently meet the threshold."
-            
+        body = "Top Roblox games currently over the 10,000 player threshold:\n\n"
+        body += "\n".join(game_list) if game_list else "No games meet the threshold today."
         msg.set_content(body)
 
-        print(f"Sending email via Brevo...")
+        print(f"Sending email via Brevo to {TARGET_EMAIL}...")
         with smtplib.SMTP('smtp-relay.brevo.com', 587) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_KEY)
             server.send_message(msg)
-        print("✅ Email sent successfully!")
+        print("✅ Success! Check your inbox.")
     except Exception as e:
         print(f"ERROR sending email: {e}")
         sys.exit(1)
