@@ -26,3 +26,8 @@ jobs:
           git add history.json
           git commit -m "Update history" || echo "No changes"
           git push
+      - name: Run Tracker
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python tracker.py
