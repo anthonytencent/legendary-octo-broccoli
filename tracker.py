@@ -5,6 +5,7 @@ import json
 
 # Configuration
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+USER_ID = os.getenv("DISCORD_USER_ID")
 CCU_THRESHOLD = 10000
 HISTORY_FILE = "history.json"
 
@@ -32,26 +33,29 @@ def get_roblox_games():
             
             if current_players >= CCU_THRESHOLD:
                 last_players = history.get(place_id)
-                if last_players is None:
-                    change = "⭐ NEW!"
+                # Check if this game is brand new to the 10k club
+                is_brand_new = last_players is None
+                
+                if is_brand_new:
+                    change_text = "⭐ NEW!"
                     growth = 0
                 else:
                     diff = current_players - last_players
-                    change = f"{diff:+,}"
+                    change_text = f"{diff:+,}"
                     growth = diff
 
                 all_games.append({
                     "name": name,
                     "players": current_players,
-                    "change": change,
+                    "change": change_text,
                     "growth": growth,
+                    "is_brand_new": is_brand_new,
                     "url": f"https://www.roblox.com/games/{place_id}"
                 })
 
         with open(HISTORY_FILE, "w") as f:
             json.dump(new_history, f)
 
-        # Sort: Winners (by growth) and then list
         all_games.sort(key=lambda x: x['players'], reverse=True)
         return all_games
 
@@ -61,34 +65,38 @@ def get_roblox_games():
 
 def send_to_discord(games):
     if not games:
-        requests.post(WEBHOOK_URL, json={"content": "📉 No games hit 10k CCU today."})
         return
 
-    # Create a nice looking "Embed" message
+    # 1. Identify new games for the ping
+    new_game_names = [g['name'] for g in games if g['is_brand_new']]
+    
+    content = "📅 **Daily Roblox CCU Report is here!**"
+    if new_game_names and USER_ID:
+        # This creates the actual ping notification
+        content = f"🔔 <@{USER_ID}> **New Games Hit 10k CCU:** {', '.join(new_game_names)}!"
+
+    # 2. Create the visual report
     embed = {
-        "title": "🚀 Roblox Daily CCU Report",
-        "color": 5814783, # Nice Blue
+        "title": "Roblox Market Trends",
+        "description": "Top games currently over 10,000 players.",
+        "color": 16738560, # Orange/Flame color
         "fields": []
     }
 
-    # Add top 10 games to the embed (Discord limits)
     for g in games[:10]:
         embed["fields"].append({
-            "name": g['name'],
-            "value": f"👥 Players: **{g['players']:,}** ({g['change']})\n🔗 [Play Now]({g['url']})",
+            "name": f"{'⭐ ' if g['is_brand_new'] else ''}{g['name']}",
+            "value": f"👥 **{g['players']:,}** ({g['change']})\n🔗 [Play Game]({g['url']})",
             "inline": False
         })
 
     payload = {
-        "content": "Today's Roblox Tracker is ready!",
+        "content": content,
         "embeds": [embed]
     }
     
-    response = requests.post(WEBHOOK_URL, json=payload)
-    if response.status_code == 204:
-        print("✅ Discord message sent!")
-    else:
-        print(f"❌ Failed: {response.status_code}")
+    requests.post(WEBHOOK_URL, json=payload)
+    print("✅ Discord alert sent!")
 
 if __name__ == "__main__":
     game_data = get_roblox_games()
