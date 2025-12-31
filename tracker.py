@@ -1,40 +1,47 @@
 import requests
 import smtplib
+import os
 from email.message import EmailMessage
 
-# --- CONFIGURATION ---
-EMAIL_ADDRESS = "your-email@gmail.com"
-EMAIL_PASSWORD = "your-app-password" # Not your login password, a 'Gmail App Password'
-TARGET_EMAIL = "your-email@gmail.com"
+# Configuration from GitHub Secrets
+SMTP_USER = os.getenv("BREVO_USER")
+SMTP_KEY = os.getenv("BREVO_KEY")
+TARGET_EMAIL = os.getenv("TARGET_EMAIL")
 CCU_THRESHOLD = 10000
 
-def get_trending_games():
-    # Fetching from the "Top Playing" sort
-    url = "https://games.roblox.com/v1/games/list?sortToken=TopPlayingNow"
+def get_roblox_games():
+    # This hits the 'Top Playing Now' sort to find popular games
+    url = "https://games.roblox.com/v1/games/list?model.maxRows=100&model.sortToken=TopPlayingNow"
     try:
         response = requests.get(url).json()
-        games_list = []
-        for game in response.get('games', []):
-            if game['playerCount'] >= CCU_THRESHOLD:
-                games_list.append(f"{game['name']} - {game['playerCount']:,} players")
-        return games_list
+        games = response.get('games', [])
+        
+        # Filter games that are over our player threshold
+        trending = []
+        for g in games:
+            if g['playerCount'] >= CCU_THRESHOLD:
+                trending.append(f"🔥 {g['name']}: {g['playerCount']:,} players")
+        return trending
     except Exception as e:
-        return [f"Error fetching games: {e}"]
+        return [f"Error fetching data: {e}"]
 
-def send_email(games):
+def send_email(game_list):
     msg = EmailMessage()
-    msg['Subject'] = f"🚀 Roblox Daily Tracker: {len(games)} Games Over 10k CCU"
-    msg['From'] = EMAIL_ADDRESS
+    msg['Subject'] = f"📅 Roblox Tracker: {len(game_list)} Games @ 10k+ CCU"
+    msg['From'] = f"Roblox Monitor <{SMTP_USER}>"
     msg['To'] = TARGET_EMAIL
     
-    body = "Here are today's trending games with over 10,000 players:\n\n"
-    body += "\n".join(games) if games else "No new games hit the 10k threshold today."
+    body = "Today's high-traffic Roblox games:\n\n"
+    body += "\n".join(game_list) if game_list else "No games hit the 10k threshold today."
     msg.set_content(body)
 
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        smtp.send_message(msg)
+    # Connect to Brevo's SMTP server
+    with smtplib.SMTP('smtp-relay.brevo.com', 587) as server:
+        server.starttls() # Secure the connection
+        server.login(SMTP_USER, SMTP_KEY)
+        server.send_message(msg)
+    print("Email sent successfully!")
 
 if __name__ == "__main__":
-    trending = get_trending_games()
-    send_email(trending)
+    games = get_roblox_games()
+    send_email(games)
